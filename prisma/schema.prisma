@@ -1,0 +1,340 @@
+// ============================================================
+// Prisma Schema — mapped 1:1 from 01_schema.sql
+// Source of truth for all table/column/enum names
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ======================== ENUMS ========================
+
+enum lot_status {
+  draft
+  active
+  matched
+  in_transaction
+  completed
+  expired
+}
+
+enum lot_condition {
+  working
+  non_working
+  damaged
+  mixed
+}
+
+enum source_type {
+  household
+  commercial
+  industrial
+  institutional
+}
+
+enum transaction_status {
+  quoted
+  accepted
+  in_transit
+  handed_over
+  confirmed
+  completed
+  cancelled
+  disputed
+}
+
+enum payment_status {
+  pending
+  partial
+  completed
+  refunded
+}
+
+enum payment_method {
+  cash
+  upi
+  bank_transfer
+  other
+}
+
+enum authorization_status {
+  authorized
+  pending
+  suspended
+  revoked
+}
+
+enum preferred_language {
+  hi
+  mr
+  en
+}
+
+enum training_sample_source {
+  lot_completion
+  transaction
+  manual_upload
+}
+
+enum sync_operation {
+  create_lot
+  update_lot_status
+  create_transaction
+  update_transaction_status
+  create_handover
+}
+
+enum sync_status {
+  pending
+  applied
+  conflict
+  rejected
+}
+
+// ======================== MODELS ========================
+
+model collectors {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone              String              @unique @db.VarChar(15)
+  otp_secret         String?             @db.VarChar(6)
+  otp_expires_at     DateTime?           @db.Timestamptz()
+  pin_hash           String?             @db.VarChar(255)
+  preferred_language preferred_language   @default(hi)
+  location_lat       Decimal?            @db.Decimal(10, 8)
+  location_lng       Decimal?            @db.Decimal(11, 8)
+  is_verified        Boolean             @default(false)
+  created_at         DateTime            @default(now()) @db.Timestamptz()
+  updated_at         DateTime            @default(now()) @updatedAt @db.Timestamptz()
+
+  lots               lots[]
+  transactions       transactions[]
+  sync_logs          sync_log[]
+}
+
+model material_categories {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String   @db.VarChar(100)
+  code          String   @unique @db.VarChar(20)
+  description   String?
+  icon_url      String?  @db.VarChar(255)
+  hazard_level  Int      @default(0)
+  parent_id     String?  @db.Uuid
+  created_at    DateTime @default(now()) @db.Timestamptz()
+
+  parent        material_categories?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children      material_categories[] @relation("CategoryHierarchy")
+
+  lots              lots[]              @relation("LotCategory")
+  sub_category_lots lots[]              @relation("LotSubCategory")
+  recycler_materials recycler_materials[]
+  price_history      price_history[]
+  ai_training_samples ai_training_samples[]
+  ml_feedback_corrected ml_feedback[]   @relation("CorrectedCategory")
+}
+
+model lots {
+  id                      String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collector_id            String         @db.Uuid
+  category_id             String         @db.Uuid
+  sub_category_id         String?        @db.Uuid
+  image_url               String?        @db.VarChar(255)
+  approximate_weight      Decimal        @db.Decimal(10, 2)
+  condition               lot_condition  @default(mixed)
+  source_type             source_type    @default(household)
+  estimated_value         Decimal?       @db.Decimal(10, 2)
+  status                  lot_status     @default(draft)
+  collection_location_lat Decimal?       @db.Decimal(10, 8)
+  collection_location_lng Decimal?       @db.Decimal(11, 8)
+  collection_address      String?
+  notes                   String?
+  created_at              DateTime       @default(now()) @db.Timestamptz()
+  updated_at              DateTime       @default(now()) @updatedAt @db.Timestamptz()
+
+  collector               collectors             @relation(fields: [collector_id], references: [id])
+  category                material_categories    @relation("LotCategory", fields: [category_id], references: [id])
+  sub_category            material_categories?   @relation("LotSubCategory", fields: [sub_category_id], references: [id])
+  transactions            transactions[]
+  ai_training_samples     ai_training_samples[]
+
+  @@index([collector_id])
+  @@index([category_id])
+  @@index([status])
+}
+
+model recyclers {
+  id                     String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_name          String                @db.VarChar(200)
+  registration_number    String?               @unique @db.VarChar(100)
+  authorization_status   authorization_status  @default(pending)
+  contact_phone          String?               @db.VarChar(15)
+  contact_email          String?               @unique @db.VarChar(100)
+  password_hash          String?               @db.VarChar(255)
+  email_verified         Boolean               @default(false)
+  address                String?
+  location_lat           Decimal?              @db.Decimal(10, 8)
+  location_lng           Decimal?              @db.Decimal(11, 8)
+  pickup_available       Boolean               @default(false)
+  max_pickup_distance_km Int                   @default(50)
+  operating_hours        String?               @db.VarChar(100)
+  created_at             DateTime              @default(now()) @db.Timestamptz()
+  updated_at             DateTime              @default(now()) @updatedAt @db.Timestamptz()
+
+  recycler_materials     recycler_materials[]
+  transactions           transactions[]
+}
+
+model recycler_materials {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recycler_id   String   @db.Uuid
+  category_id   String   @db.Uuid
+  buying_price  Decimal  @db.Decimal(10, 2)
+  unit          String   @default("kg") @db.VarChar(20)
+  min_quantity  Decimal  @default(0) @db.Decimal(10, 2)
+  last_updated  DateTime @default(now()) @db.Timestamptz()
+
+  recycler      recyclers           @relation(fields: [recycler_id], references: [id], onDelete: Cascade)
+  category      material_categories @relation(fields: [category_id], references: [id])
+
+  @@unique([recycler_id, category_id])
+}
+
+model price_history {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id   String   @db.Uuid
+  location      String?  @db.VarChar(100)
+  buying_price  Decimal  @db.Decimal(10, 2)
+  selling_price Decimal? @db.Decimal(10, 2)
+  source        String?  @db.VarChar(100)
+  recorded_at   DateTime @default(now()) @db.Timestamptz()
+
+  category      material_categories @relation(fields: [category_id], references: [id])
+
+  @@index([category_id])
+  @@index([recorded_at])
+}
+
+model transactions {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lot_id              String              @db.Uuid
+  collector_id        String              @db.Uuid
+  recycler_id         String              @db.Uuid
+  offered_price       Decimal             @db.Decimal(10, 2)
+  final_price         Decimal?            @db.Decimal(10, 2)
+  final_weight        Decimal?            @db.Decimal(10, 2)
+  status              transaction_status  @default(quoted)
+  payment_status      payment_status      @default(pending)
+  payment_method      payment_method?
+  status_history      Json                @default("[]")
+  pickup_scheduled_at DateTime?           @db.Timestamptz()
+  completed_at        DateTime?           @db.Timestamptz()
+  cancelled_at        DateTime?           @db.Timestamptz()
+  cancellation_reason String?
+  created_at          DateTime            @default(now()) @db.Timestamptz()
+  updated_at          DateTime            @default(now()) @updatedAt @db.Timestamptz()
+
+  lot                 lots       @relation(fields: [lot_id], references: [id])
+  collector           collectors @relation(fields: [collector_id], references: [id])
+  recycler            recyclers  @relation(fields: [recycler_id], references: [id])
+  traceability        traceability?
+
+  @@index([collector_id])
+  @@index([recycler_id])
+  @@index([lot_id])
+}
+
+model traceability {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transaction_id            String    @unique @db.Uuid
+  handover_reference_number String    @unique @db.VarChar(20)
+  actual_weight             Decimal   @db.Decimal(10, 2)
+  handover_location_lat     Decimal?  @db.Decimal(10, 8)
+  handover_location_lng     Decimal?  @db.Decimal(11, 8)
+  handover_timestamp        DateTime  @default(now()) @db.Timestamptz()
+  collector_confirmed       Boolean   @default(true)
+  collector_confirmed_at    DateTime? @default(now()) @db.Timestamptz()
+  recycler_confirmed        Boolean   @default(false)
+  recycler_confirmed_at     DateTime? @db.Timestamptz()
+  notes                     String?
+  created_at                DateTime  @default(now()) @db.Timestamptz()
+
+  transaction               transactions          @relation(fields: [transaction_id], references: [id])
+  photos                    traceability_photos[]
+}
+
+model traceability_photos {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  traceability_id String   @db.Uuid
+  photo_url       String   @db.VarChar(255)
+  photo_type      String   @default("handover") @db.VarChar(50)
+  uploaded_at     DateTime @default(now()) @db.Timestamptz()
+
+  traceability    traceability @relation(fields: [traceability_id], references: [id], onDelete: Cascade)
+}
+
+model ai_training_samples {
+  id            String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  image_url     String                  @db.VarChar(255)
+  category_id   String?                 @db.Uuid
+  weight        Decimal?                @db.Decimal(10, 2)
+  price         Decimal?                @db.Decimal(10, 2)
+  location      String?                 @db.VarChar(100)
+  source        training_sample_source  @default(lot_completion)
+  quality_notes String?
+  lot_id        String?                 @db.Uuid
+  created_at    DateTime                @default(now()) @db.Timestamptz()
+
+  category      material_categories?    @relation(fields: [category_id], references: [id])
+  lot           lots?                   @relation(fields: [lot_id], references: [id])
+  feedback      ml_feedback[]
+}
+
+// ============================================================
+// ADDITIONS (approved via §7 flag-back)
+// ============================================================
+
+model sync_log {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collector_id     String          @db.Uuid
+  idempotency_key  String          @unique @db.VarChar(64)
+  operation        sync_operation
+  payload          Json
+  client_timestamp DateTime        @db.Timestamptz()
+  server_timestamp DateTime        @default(now()) @db.Timestamptz()
+  status           sync_status     @default(pending)
+  conflict_detail  String?
+  resolved_at      DateTime?       @db.Timestamptz()
+  created_at       DateTime        @default(now()) @db.Timestamptz()
+
+  collector        collectors      @relation(fields: [collector_id], references: [id])
+
+  @@index([collector_id])
+  @@index([status])
+}
+
+model admins {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique @db.VarChar(150)
+  password_hash String   @db.VarChar(255)
+  full_name     String?  @db.VarChar(150)
+  created_at    DateTime @default(now()) @db.Timestamptz()
+}
+
+model ml_feedback {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  training_sample_id  String   @db.Uuid
+  corrected_category  String?  @db.Uuid
+  corrected_weight    Decimal? @db.Decimal(10, 2)
+  corrected_price     Decimal? @db.Decimal(10, 2)
+  feedback_source     String   @default("collector") @db.VarChar(20)
+  notes               String?
+  applied_to_model    Boolean  @default(false)
+  created_at          DateTime @default(now()) @db.Timestamptz()
+
+  training_sample     ai_training_samples  @relation(fields: [training_sample_id], references: [id], onDelete: Cascade)
+  corrected_cat       material_categories? @relation("CorrectedCategory", fields: [corrected_category], references: [id])
+}

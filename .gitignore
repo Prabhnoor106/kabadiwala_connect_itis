@@ -1,0 +1,62 @@
+# ---------- Dependencies ----------
+node_modules/
+frontend/node_modules/
+
+# ---------- Secrets — never commit ----------
+# .env holds DATABASE_URL, JWT_SECRET and storage credentials.
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Supabase key dump kept locally for reference only.
+Supabase Direct API.txt
+
+# ---------- Build output ----------
+dist/
+build/
+frontend/dist/
+frontend/build/
+.vite/
+
+# ---------- Uploads ----------
+uploads/*
+!uploads/.gitkeep
+
+# ---------- Logs ----------
+*.log
+logs/
+npm-debug.log*
+
+# ---------- Prisma ----------
+prisma/migrations/
+
+# ---------- Editors / OS ----------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ---------- Local dev database (self-contained PG cluster) ----------
+.localdb/
+*.pg.log
+
+# ---------- Scratch ----------
+geg/
+coverage/
+*.tsbuildinfo
+
+# ---------- Local tooling / agent artifacts (not part of the app) ----------
+.claude/
+.agents/
+.presentation/
+.mcp.json
+skills-lock.json
+
+# ---------- Presentation / pitch binaries (kept local, not in the repo) ----------
+/Kabadiwala Connect.pdf
+/Kabadiwala_Connect_Idea_Presentation.pptx
+/Kabadiwala_Connect_Tech_Stack.pptx

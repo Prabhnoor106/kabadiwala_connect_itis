@@ -1,0 +1,53 @@
+# ============================================================
+# Render Blueprint — Kabadiwala Connect API (backend)
+# Deploy: Render Dashboard → New → Blueprint → pick this repo.
+# Render reads this file and provisions the web service below.
+# Docs: https://render.com/docs/blueprint-spec
+# ============================================================
+services:
+  - type: web
+    name: kabadiwala-connect-api
+    runtime: node
+    plan: free
+    # Supabase DB lives in ap-southeast-1, so keep the API close to it.
+    region: singapore
+    branch: main
+    # Prisma client is generated on Render's Linux host at build time and is
+    # never committed to git.
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
+    # Matches the health route in app.js (reports DB connectivity).
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Secrets — set these in the Render dashboard, not in this file.
+      # DATABASE_URL: your Supabase connection string (Settings → Database).
+      - key: DATABASE_URL
+        sync: false
+      # CORS_ORIGIN: set to your Vercel URL after the frontend deploys,
+      # e.g. https://kabadiwala-connect.vercel.app  (comma-separate multiples).
+      - key: CORS_ORIGIN
+        sync: false
+      # Render generates a strong secret on first deploy.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: BCRYPT_ROUNDS
+        value: "12"
+      # 'console' is safe: in production the OTP is NOT returned in the API
+      # response, only logged. Swap for a real SMS provider when you have one.
+      - key: SMS_PROVIDER
+        value: console
+      # Empty = uploads served from the API's local disk (see DEPLOYMENT.md
+      # for the ephemeral-disk caveat). Set 'imagekit' + keys for persistence.
+      - key: CLOUD_STORAGE_PROVIDER
+        value: ""
+      - key: AI_SERVICE_ENABLED
+        value: "false"
+      - key: PRICE_TREND_CRON
+        value: "0 */6 * * *"
+      - key: MODEL_RETRAIN_CRON
+        value: "0 2 * * *"
