@@ -7,11 +7,17 @@
  *
  * Controllers stay thin; every credential check happens here.
  */
+
 const Collector = require('../models/Collector');
 const Recycler = require('../models/Recycler');
 const Admin = require('../models/Admin');
 const { generateToken } = require('../middleware/auth.middleware');
-const { hashPassword, verifyPassword, validatePasswordStrength, validatePin } = require('./password.service');
+const {
+  hashPassword,
+  verifyPassword,
+  validatePasswordStrength,
+  validatePin
+} = require('./password.service');
 const { sendOTP } = require('./notification.service');
 const { ROLES } = require('../config/constants');
 const logger = require('../utils/logger');
@@ -29,7 +35,7 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Issue an OTP for a phone number, registering the collector on first contact.
- * Returns the OTP itself only outside production so the flow is testable.
+ * Returns the OTP itself when SHOW_OTP_ON_SCREEN=true.
  */
 async function requestCollectorOtp(phone) {
   let collector = await Collector.findByPhone(phone);
@@ -38,21 +44,30 @@ async function requestCollectorOtp(phone) {
   if (!collector) {
     collector = await Collector.create({ phone });
     isNew = true;
-    logger.info('New collector registered', { collector_id: collector.id });
+
+    logger.info('New collector registered', {
+      collector_id: collector.id
+    });
   }
 
   const otp = String(Math.floor(100000 + Math.random() * 900000));
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
-  await Collector.setOtp(collector.id, { otp_secret: otp, otp_expires_at: expiresAt });
+  await Collector.setOtp(collector.id, {
+    otp_secret: otp,
+    otp_expires_at: expiresAt
+  });
+
   await sendOTP(phone, otp);
 
   return {
     phone,
     is_new_collector: isNew,
     expires_in_seconds: OTP_TTL_MS / 1000,
-    // Dev/demo convenience: no SMS gateway is wired up, so surface the code.
-    ...(process.env.NODE_ENV !== 'production' && { otp }),
+
+    // Demo/SIH convenience:
+    // Show OTP on the frontend when explicitly enabled.
+    ...(process.env.SHOW_OTP_ON_SCREEN === 'true' && { otp }),
   };
 }
 
@@ -61,21 +76,36 @@ async function requestCollectorOtp(phone) {
  */
 async function verifyCollectorOtp(phone, otp) {
   const collector = await Collector.findByPhone(phone);
+
   if (!collector) {
-    throw httpError('Phone number not found. Request an OTP first.', 404);
+    throw httpError(
+      'Phone number not found. Request an OTP first.',
+      404
+    );
   }
+
   if (!collector.otp_secret || collector.otp_secret !== otp) {
     throw httpError('Invalid OTP.', 401);
   }
-  if (!collector.otp_expires_at || new Date() > collector.otp_expires_at) {
+
+  if (
+    !collector.otp_expires_at ||
+    new Date() > collector.otp_expires_at
+  ) {
     throw httpError('OTP expired. Request a new one.', 401);
   }
 
   await Collector.verify(collector.id);
 
   return {
-    token: generateToken({ id: collector.id, phone: collector.phone, role: ROLES.COLLECTOR }),
+    token: generateToken({
+      id: collector.id,
+      phone: collector.phone,
+      role: ROLES.COLLECTOR
+    }),
+
     role: ROLES.COLLECTOR,
+
     user: {
       id: collector.id,
       phone: collector.phone,
@@ -94,17 +124,30 @@ async function loginCollectorWithPin(phone, pin) {
 
   // Uniform failure message — never reveal whether the phone exists or
   // whether a PIN was configured for it.
-  const ok = collector && (await verifyPassword(pin, collector.pin_hash));
+  const ok =
+    collector &&
+    (await verifyPassword(pin, collector.pin_hash));
+
   if (!ok) {
     throw httpError('Invalid phone number or PIN.', 401);
   }
+
   if (!collector.is_verified) {
-    throw httpError('Verify your phone with an OTP before using a PIN.', 403);
+    throw httpError(
+      'Verify your phone with an OTP before using a PIN.',
+      403
+    );
   }
 
   return {
-    token: generateToken({ id: collector.id, phone: collector.phone, role: ROLES.COLLECTOR }),
+    token: generateToken({
+      id: collector.id,
+      phone: collector.phone,
+      role: ROLES.COLLECTOR
+    }),
+
     role: ROLES.COLLECTOR,
+
     user: {
       id: collector.id,
       phone: collector.phone,
@@ -120,10 +163,19 @@ async function loginCollectorWithPin(phone, pin) {
  */
 async function setCollectorPin(collector_id, pin) {
   const check = validatePin(pin);
-  if (!check.valid) throw httpError(check.message, 400);
 
-  await Collector.setPinHash(collector_id, await hashPassword(pin));
-  return { has_pin: true };
+  if (!check.valid) {
+    throw httpError(check.message, 400);
+  }
+
+  await Collector.setPinHash(
+    collector_id,
+    await hashPassword(pin)
+  );
+
+  return {
+    has_pin: true
+  };
 }
 
 // ============================================================
@@ -152,13 +204,20 @@ async function registerRecycler({
   operating_hours,
 }) {
   const strength = validatePasswordStrength(password);
-  if (!strength.valid) throw httpError(strength.message, 400);
+
+  if (!strength.valid) {
+    throw httpError(strength.message, 400);
+  }
 
   const email = String(contact_email).toLowerCase().trim();
 
   const existing = await Recycler.findByEmailWithSecret(email);
+
   if (existing) {
-    throw httpError('An account with this email already exists.', 409);
+    throw httpError(
+      'An account with this email already exists.',
+      409
+    );
   }
 
   const recycler = await Recycler.create({
@@ -176,11 +235,22 @@ async function registerRecycler({
     authorization_status: 'pending',
   });
 
-  logger.info('New recycler registered (pending verification)', { recycler_id: recycler.id });
+  logger.info(
+    'New recycler registered (pending verification)',
+    {
+      recycler_id: recycler.id
+    }
+  );
 
   return {
-    token: generateToken({ id: recycler.id, email, role: ROLES.RECYCLER }),
+    token: generateToken({
+      id: recycler.id,
+      email,
+      role: ROLES.RECYCLER
+    }),
+
     role: ROLES.RECYCLER,
+
     user: recycler,
   };
 }
@@ -193,14 +263,25 @@ async function registerRecycler({
  * enforced per-endpoint by requireAuthorizedRecycler.
  */
 async function loginRecycler(contact_email, password) {
-  const recycler = await Recycler.findByEmailWithSecret(contact_email);
+  const recycler =
+    await Recycler.findByEmailWithSecret(contact_email);
 
-  const ok = recycler && (await verifyPassword(password, recycler.password_hash));
+  const ok =
+    recycler &&
+    (await verifyPassword(
+      password,
+      recycler.password_hash
+    ));
+
   if (!ok) {
     throw httpError('Invalid email or password.', 401);
   }
+
   if (recycler.authorization_status === 'revoked') {
-    throw httpError('This account has been revoked. Contact platform support.', 403);
+    throw httpError(
+      'This account has been revoked. Contact platform support.',
+      403
+    );
   }
 
   const { password_hash, ...safe } = recycler;
@@ -211,7 +292,9 @@ async function loginRecycler(contact_email, password) {
       email: recycler.contact_email,
       role: ROLES.RECYCLER,
     }),
+
     role: ROLES.RECYCLER,
+
     user: safe,
   };
 }
@@ -226,18 +309,33 @@ async function loginRecycler(contact_email, password) {
  * The first admin can bootstrap itself (empty table). After that, creating an
  * admin requires an existing admin caller — enforced by `requesterIsAdmin`.
  */
-async function registerAdmin({ email, password, full_name }, { requesterIsAdmin = false } = {}) {
+async function registerAdmin(
+  { email, password, full_name },
+  { requesterIsAdmin = false } = {}
+) {
   const strength = validatePasswordStrength(password);
-  if (!strength.valid) throw httpError(strength.message, 400);
 
-  const existingCount = await Admin.count();
-  if (existingCount > 0 && !requesterIsAdmin) {
-    throw httpError('Only an existing admin can create admin accounts.', 403);
+  if (!strength.valid) {
+    throw httpError(strength.message, 400);
   }
 
-  const normalized = String(email).toLowerCase().trim();
+  const existingCount = await Admin.count();
+
+  if (existingCount > 0 && !requesterIsAdmin) {
+    throw httpError(
+      'Only an existing admin can create admin accounts.',
+      403
+    );
+  }
+
+  const normalized =
+    String(email).toLowerCase().trim();
+
   if (await Admin.findByEmailWithSecret(normalized)) {
-    throw httpError('An admin with this email already exists.', 409);
+    throw httpError(
+      'An admin with this email already exists.',
+      409
+    );
   }
 
   const admin = await Admin.create({
@@ -246,11 +344,20 @@ async function registerAdmin({ email, password, full_name }, { requesterIsAdmin 
     full_name: full_name || null,
   });
 
-  logger.info('New admin created', { admin_id: admin.id, bootstrap: existingCount === 0 });
+  logger.info('New admin created', {
+    admin_id: admin.id,
+    bootstrap: existingCount === 0
+  });
 
   return {
-    token: generateToken({ id: admin.id, email: admin.email, role: ROLES.ADMIN }),
+    token: generateToken({
+      id: admin.id,
+      email: admin.email,
+      role: ROLES.ADMIN
+    }),
+
     role: ROLES.ADMIN,
+
     user: admin,
   };
 }
@@ -259,18 +366,34 @@ async function registerAdmin({ email, password, full_name }, { requesterIsAdmin 
  * Log an admin in.
  */
 async function loginAdmin(email, password) {
-  const admin = await Admin.findByEmailWithSecret(email);
+  const admin =
+    await Admin.findByEmailWithSecret(email);
 
-  const ok = admin && (await verifyPassword(password, admin.password_hash));
+  const ok =
+    admin &&
+    (await verifyPassword(
+      password,
+      admin.password_hash
+    ));
+
   if (!ok) {
-    throw httpError('Invalid email or password.', 401);
+    throw httpError(
+      'Invalid email or password.',
+      401
+    );
   }
 
   const { password_hash, ...safe } = admin;
 
   return {
-    token: generateToken({ id: admin.id, email: admin.email, role: ROLES.ADMIN }),
+    token: generateToken({
+      id: admin.id,
+      email: admin.email,
+      role: ROLES.ADMIN
+    }),
+
     role: ROLES.ADMIN,
+
     user: safe,
   };
 }
@@ -286,9 +409,14 @@ async function loginAdmin(email, password) {
 async function getCurrentUser({ id, role }) {
   if (role === ROLES.COLLECTOR) {
     const c = await Collector.findById(id);
-    if (!c) throw httpError('Account not found.', 404);
+
+    if (!c) {
+      throw httpError('Account not found.', 404);
+    }
+
     return {
       role,
+
       user: {
         id: c.id,
         phone: c.phone,
@@ -304,14 +432,28 @@ async function getCurrentUser({ id, role }) {
 
   if (role === ROLES.RECYCLER) {
     const r = await Recycler.findById(id);
-    if (!r) throw httpError('Account not found.', 404);
-    return { role, user: r };
+
+    if (!r) {
+      throw httpError('Account not found.', 404);
+    }
+
+    return {
+      role,
+      user: r
+    };
   }
 
   if (role === ROLES.ADMIN) {
     const a = await Admin.findById(id);
-    if (!a) throw httpError('Account not found.', 404);
-    return { role, user: a };
+
+    if (!a) {
+      throw httpError('Account not found.', 404);
+    }
+
+    return {
+      role,
+      user: a
+    };
   }
 
   throw httpError('Unknown role on token.', 401);
